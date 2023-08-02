@@ -1,14 +1,10 @@
 import gymnasium as gym
-import highway_env_mpc
 import pprint, copy, math
 import numpy as np
 import casadi as csd
 from matplotlib import pyplot as plt
 import pygame
 import cv2
-
-from highway_env.vehicle.behavior import IDMVehicle
-from highway_env.road.graphics import WorldSurface
 
 env = gym.make("highway-env-mpc-v0", render_mode='rgb_array')
 pprint.pprint(env.config)
@@ -87,10 +83,11 @@ for it in range(200):
     heading = opti.variable(N+1)
     
     # Objective: Maximize x position at the end of the horizon
-    c_acc = 0.1
-    c_delta = 1.0
-    c_jerk = 0
-    opti.minimize(-x[N] + c_acc * csd.sum1(acc) + c_delta * csd.sum1(delta) + c_jerk * csd.sum1(csd.diff(acc)))
+    c_acc = 0 # Doesn't make sense to put a penalty on acceleration since our goal is to go fast
+    c_delta = 0.5
+    c_jerk = 0.1
+    C_y = 0
+    opti.minimize(-x[N] + C_y*(y[N] - 8)**2 + c_acc * csd.sum1(acc) + c_delta * csd.sum1(delta) + c_jerk * csd.sum1(csd.diff(acc)))
     #opti.minimize(-csd.sum1(speed) + c_acc * csd.sum1(acc) + c_delta * csd.sum1(delta))
     #opti.minimize(-csd.sum1(x) + a*csd.sum1(acc) + b*csd.sum1(delta))
     
@@ -146,7 +143,7 @@ for it in range(200):
         x_adj = x[k+1] + vehicle_length/2 * csd.cos(heading[k+1])
         y_adj = y[k+1] + vehicle_length/2 * csd.sin(heading[k+1])
         for i in range(other_x.shape[0]):
-            opti.subject_to(csd.sqrt((x_adj - other_x[i])**2 + (y_adj - other_y[i])**2) >= vehicle_length/2)
+            opti.subject_to(csd.sqrt((x_adj - other_x[i])**2 + (y_adj - other_y[i])**2) >= vehicle_length)
     
     # Can use csd.if_else(condition, true value, false value)
     # Can use conditional if we have multiple conditions
@@ -159,6 +156,10 @@ for it in range(200):
     opti.subject_to(speed[0] == math.sqrt(ego_obs[3]**2 + ego_obs[4]**2))
     opti.subject_to(heading[0] == ego_obs[5])
 
+    # Warm start to previous solution
+    opti.set_initial(acc, ego_actions[:, 0])
+    opti.set_initial(delta, ego_actions[:, 1])
+    
     # Solve the optimization
     opti.solver('ipopt')
     sol = opti.solve()
